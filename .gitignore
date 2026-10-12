@@ -40,3 +40,11 @@ outputs/*.csv
 Thumbs.db
 .vscode/
 .idea/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local backups
+*.backup

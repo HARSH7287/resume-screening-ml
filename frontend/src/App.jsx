@@ -1,11 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   checkHealth,
-  createModelVersion,
-  exportRankings,
-  getModelStatus,
   recommendUploadedResume,
-  retrainModels,
   submitFeedback,
 } from "./api.js";
 
@@ -169,31 +165,6 @@ function ResultCard({ result, rank, onFeedback, feedbackStatus }) {
         </div>
       </div>
 
-      <div className="skill-cloud">
-        {(result.matched_skills || []).map((skill) => (
-          <span className="chip match-chip" key={skill}>{skill}</span>
-        ))}
-        {(result.missing_skills || []).map((skill) => (
-          <span className="chip gap-chip" key={skill}>{skill}</span>
-        ))}
-      </div>
-
-      <details className="preview">
-        <summary>Resume preview with matched skill highlights</summary>
-        <HighlightedText text={result.parsed_text_preview} skills={result.matched_skills} />
-      </details>
-
-      <div className="feedback-panel">
-        <span>Recruiter feedback</span>
-        <div className="feedback-actions">
-          {FEEDBACK_ACTIONS.map((action) => (
-            <button key={action.type} type="button" onClick={() => onFeedback(result, action.type)}>
-              {action.label}
-            </button>
-          ))}
-        </div>
-        {feedbackStatus && <p>{feedbackStatus}</p>}
-      </div>
     </article>
   );
 }
@@ -208,16 +179,8 @@ export default function App() {
   const [projectsCount, setProjectsCount] = useState(0);
   const [results, setResults] = useState([]);
   const [errors, setErrors] = useState([]);
-  const [exportMessage, setExportMessage] = useState("");
   const [feedbackMessages, setFeedbackMessages] = useState({});
   const [isScreening, setIsScreening] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [modelStatus, setModelStatus] = useState(null);
-  const [modelMessage, setModelMessage] = useState("");
-  const [isModelBusy, setIsModelBusy] = useState(false);
-  const [minimumScore, setMinimumScore] = useState(0);
-  const [skillFilterMode, setSkillFilterMode] = useState("has");
-  const [skillFilter, setSkillFilter] = useState("");
   const [backendReady, setBackendReady] = useState(null);
 
   useEffect(() => {
@@ -232,33 +195,10 @@ export default function App() {
     return [...results].sort((a, b) => Number(b.final_score) - Number(a.final_score));
   }, [results]);
 
-  const allSkills = useMemo(() => {
-    const skills = new Set();
-    results.forEach((result) => {
-      [...(result.matched_skills || []), ...(result.missing_skills || []), ...(result.resume_skills || [])].forEach((skill) => skills.add(skill));
-    });
-    return [...skills].sort();
-  }, [results]);
-
-  const filteredResults = useMemo(() => {
-    return rankedResults.filter((result) => {
-      const scorePass = Number(result.final_score) >= Number(minimumScore);
-      let skillPool = [];
-      if (skillFilterMode === "matched") {
-        skillPool = result.matched_skills || [];
-      } else if (skillFilterMode === "missing") {
-        skillPool = result.missing_skills || [];
-      } else {
-        skillPool = result.resume_skills || [];
-      }
-      const skillPass = !skillFilter || skillPool.includes(skillFilter);
-      return scorePass && skillPass;
-    });
-  }, [rankedResults, minimumScore, skillFilter, skillFilterMode]);
+  const filteredResults = rankedResults;
 
   async function handleScreen() {
     setErrors([]);
-    setExportMessage("");
     setFeedbackMessages({});
     setResults([]);
 
@@ -296,21 +236,6 @@ export default function App() {
     setIsScreening(false);
   }
 
-  async function handleExport() {
-    if (!filteredResults.length) return;
-
-    setIsExporting(true);
-    setExportMessage("");
-    try {
-      const response = await exportRankings(filteredResults);
-      setExportMessage(`Saved ${response.rows_exported} rows to ${response.file_path}`);
-    } catch (error) {
-      setErrors([error.message]);
-    } finally {
-      setIsExporting(false);
-    }
-  }
-
   async function handleFeedback(result, feedbackType) {
     const key = `${result.filename}-${feedbackType}`;
     setFeedbackMessages((current) => ({ ...current, [key]: "Saving..." }));
@@ -335,41 +260,6 @@ export default function App() {
       setFeedbackMessages((current) => ({ ...current, [key]: response.message }));
     } catch (error) {
       setFeedbackMessages((current) => ({ ...current, [key]: error.message }));
-    }
-  }
-
-  async function refreshModelStatus() {
-    setModelMessage("");
-    try {
-      setModelStatus(await getModelStatus());
-    } catch (error) {
-      setModelMessage(error.message);
-    }
-  }
-
-  async function handleCreateVersion() {
-    setIsModelBusy(true);
-    try {
-      const response = await createModelVersion("manual_dashboard_snapshot");
-      setModelMessage(`Created ${response.version_id} with ${response.artifact_count} artifacts.`);
-      await refreshModelStatus();
-    } catch (error) {
-      setModelMessage(error.message);
-    } finally {
-      setIsModelBusy(false);
-    }
-  }
-
-  async function handleRetrainPlan() {
-    setIsModelBusy(true);
-    try {
-      const response = await retrainModels();
-      setModelMessage(`${response.message} Matching feedback rows: ${response.prepared_feedback.matching_rows}. Screening feedback rows: ${response.prepared_feedback.screening_rows}.`);
-      await refreshModelStatus();
-    } catch (error) {
-      setModelMessage(error.message);
-    } finally {
-      setIsModelBusy(false);
     }
   }
 
@@ -407,83 +297,13 @@ export default function App() {
             <textarea value={jobText} onChange={(event) => setJobText(event.target.value)} rows={8} />
           </label>
 
-          <div className="compact-fields">
-            <label className="field">
-              <span>Experience</span>
-              <input type="number" min="0" value={experienceYears} onChange={(event) => setExperienceYears(event.target.value)} />
-            </label>
-            <label className="field">
-              <span>Projects</span>
-              <input type="number" min="0" value={projectsCount} onChange={(event) => setProjectsCount(event.target.value)} />
-            </label>
-          </div>
-
-          <label className="field">
-            <span>Education</span>
-            <input value={education} onChange={(event) => setEducation(event.target.value)} placeholder="B.Tech, MBA, M.Sc" />
-          </label>
-
-          <label className="field">
-            <span>Certifications</span>
-            <input value={certifications} onChange={(event) => setCertifications(event.target.value)} placeholder="AWS, Google ML, Cisco" />
-          </label>
-
           <button className="primary-action" type="button" onClick={handleScreen} disabled={isScreening}>
             {isScreening ? "Screening resumes..." : "Screen resumes"}
           </button>
 
-          <div className="admin-panel">
-            <span>Model operations</span>
-            <div className="admin-actions">
-              <button type="button" onClick={refreshModelStatus}>Status</button>
-              <button type="button" onClick={handleCreateVersion} disabled={isModelBusy}>Snapshot</button>
-              <button type="button" onClick={handleRetrainPlan} disabled={isModelBusy}>Retrain Prep</button>
-            </div>
-            {modelStatus && (
-              <p>
-                Feedback rows: {modelStatus.feedback.rows} · Versions: {modelStatus.versions.length}
-              </p>
-            )}
-            {modelMessage && <p>{modelMessage}</p>}
-          </div>
         </aside>
 
         <section className="results-area">
-          <div className="filter-row">
-            <label className="slider-field">
-              <span>Minimum score: {minimumScore}</span>
-              <input type="range" min="0" max="100" value={minimumScore} onChange={(event) => setMinimumScore(event.target.value)} />
-            </label>
-
-            <label className="select-field">
-              <span>Filter type</span>
-              <select value={skillFilterMode} onChange={(event) => setSkillFilterMode(event.target.value)}>
-                <option value="has">Has skill</option>
-                <option value="matched">Matched skill</option>
-                <option value="missing">Missing skill</option>
-              </select>
-            </label>
-
-            <label className="select-field">
-              <span>Skill</span>
-              <select value={skillFilter} onChange={(event) => setSkillFilter(event.target.value)}>
-                <option value="">All skills</option>
-                {allSkills.map((skill) => (
-                  <option key={skill} value={skill}>{skill}</option>
-                ))}
-              </select>
-            </label>
-
-            <button
-              className="secondary-action"
-              type="button"
-              onClick={handleExport}
-              disabled={!filteredResults.length || isExporting}
-            >
-              {isExporting ? "Saving CSV..." : "Export CSV"}
-            </button>
-          </div>
-
           {errors.length > 0 && (
             <div className="error-box">
               {errors.map((error) => (
@@ -492,16 +312,15 @@ export default function App() {
             </div>
           )}
 
-          {exportMessage && <div className="success-box"><p>{exportMessage}</p></div>}
 
-          {filteredResults.length === 0 ? (
+          {rankedResults.length === 0 ? (
             <div className="empty-state">
               <h2>No rankings yet</h2>
               <p>Upload resumes, paste a job description, then screen candidates to see ranked results.</p>
             </div>
           ) : (
             <div className="result-list">
-              {filteredResults.map((result, index) => (
+              {rankedResults.map((result, index) => (
                 <ResultCard
                   key={`${result.filename}-${index}`}
                   result={result}
